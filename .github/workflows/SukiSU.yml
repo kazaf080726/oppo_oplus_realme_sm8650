@@ -256,8 +256,8 @@ jobs:
           # 存储版本号到 GitHub 环境变量
           echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
           echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
-          # ✅修复：去掉kernel/前缀，Kbuild就在当前KernelSU目录
-          sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" ./Kbuild
+          # ✅恢复正确路径：kernel/Kbuild
+          sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" kernel/Kbuild
           else
             echo "已选择无内置KernelSU模式，跳过KernelSU配置..."
           fi
