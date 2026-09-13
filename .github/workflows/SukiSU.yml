@@ -12,12 +12,13 @@ on:
   workflow_dispatch:
     inputs:
       ksu_type:
-        description: 'KernelSU分支(仅SukiSU Ultra)'
+        description: 'KernelSU分支(ReSukiSU/SukiSU Ultra/KernelSU Next/KSU(原版)/无内置KSU,默认ReSukiSU)'
         required: true
         type: choice
-        default: 'sukisu'
+        default: 'resukisu'
         options:
           - 'sukisu'
+          - 'none'
       susfs_enable:
         description: '是否开启susfs(用于增强隐藏环境挂载功能; 可能轻微增加耗电，上游更新导致不稳定时或不需要可关闭)'
         required: true
@@ -245,19 +246,23 @@ jobs:
         id: ksu_version
         run: |
           # 进入内核工作目录
-          # 进入内核工作目录
           cd kernel_workspace
-          echo "正在配置 SukiSU‑Ultra (builtin)..."
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
-          echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%@cctv18"' >> ./common/arch/arm64/configs/gki_defconfig
-          cd ./KernelSU
-          # 生成自定义版本号（基于提交计数）, 失败时使用 114514
-          KSU_VERSION=$(expr $(git rev-list --count main) + 30700 2>/dev/null || echo 114514)
-          # 存储版本号到 GitHub 环境变量
-          echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
-          echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
-          # ✅恢复正确路径：kernel/Kbuild
-          sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" kernel/Kbuild
+
+          if [[ ${{ github.event.inputs.ksu_type }} != "none" ]]; then
+            if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
+              echo "正在配置SukiSU‑Ultra(builtin)..."
+              curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
+            fi
+
+            echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%@cctv18"' >> ./common/arch/arm64/configs/gki_defconfig
+            cd KernelSU
+
+            # 生成自定义版本号（基于提交计数）, 失败时使用 114514
+            KSU_VERSION=$(expr $(git rev-list --count main) + 30700 2>/dev/null || echo 114514)
+
+            # 存储版本号到 GitHub 环境变量
+            echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+            echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
           else
             echo "已选择无内置KernelSU模式，跳过KernelSU配置..."
           fi
@@ -643,7 +648,17 @@ jobs:
             echo "未找到内核镜像文件，构建可能出错"
             exit 1
           fi
-          KSU_TYPENAME="SukiSU"
+          if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
+            KSU_TYPENAME="SukiSU"
+          elif [[ ${{ github.event.inputs.ksu_type }} == "resukisu" ]]; then
+            KSU_TYPENAME="ReSukiSU"
+          elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
+            KSU_TYPENAME="KSUNext"
+          elif [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
+            KSU_TYPENAME="KSU"
+          else
+            KSU_TYPENAME="none"
+          fi
           if [[ ${{ github.event.inputs.lz4kd_enable }} == 'true' ]]; then
             wget https://raw.githubusercontent.com/$GITHUB_REPOSITORY/refs/heads/$GITHUB_REF_NAME/zram.zip
           fi
@@ -733,7 +748,17 @@ jobs:
           echo "TIME_FORM=$TIME_FORM" >> $GITHUB_ENV
           TAG_HEAD="OPPO-OPlus-Realme-build"
           echo "TAG_HEAD=$TAG_HEAD" >> $GITHUB_ENV
-          KSU_TYPENAME="SukiSU Ultra"
+          if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
+            KSU_TYPENAME="SukiSU Ultra"
+          elif [[ ${{ github.event.inputs.ksu_type }} == "resukisu" ]]; then
+            KSU_TYPENAME="ReSukiSU"
+          elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
+            KSU_TYPENAME="KernelSU Next"
+          elif [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
+            KSU_TYPENAME="KSU"
+          else
+            KSU_TYPENAME="无内置KSU"
+          fi
           echo "KSU_TYPENAME=$KSU_TYPENAME" >> $GITHUB_ENV
          
       - name: 创建发布
