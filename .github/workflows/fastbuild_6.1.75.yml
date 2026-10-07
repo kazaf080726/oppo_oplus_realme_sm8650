@@ -7,6 +7,8 @@ env:
   SUB_VERSION: '75'
   KERNEL_NAME: 'android14-11-o-gca13bffobf09'
   CCACHE_KEY: ccache-ecsv4-6.1.75
+  BRAND_TAG: '欧加真'
+  SUPPORT_DEVICES: '欧加真（OPPO / 一加 / 真我）'
 
 on:
   workflow_dispatch:
