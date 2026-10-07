@@ -4,7 +4,7 @@ env:
   TZ: Asia/Shanghai
   ANDROID_VERSION: 'android14'
   KERNEL_VERSION: '6.1'
-  SUB_VERSION: '134'
+  SUB_VERSION: '134_mtk'
   KERNEL_NAME: 'android14-11-o-gca13bffobf09'
   CCACHE_KEY: ccache-ecsv4-6.1.134
   BRAND_TAG: '欧加真'
