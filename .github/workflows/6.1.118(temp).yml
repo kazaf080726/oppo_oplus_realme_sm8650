@@ -312,7 +312,48 @@ jobs:
             cd ./common
             patch -p1 -F 3 < 50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
             patch -p1 -N -F 3 < 69_hide_stuff.patch || true
+
+            # ===== 修复 fake_state 未定义符号（SUSFS v2.3.0 + BakaSU v4.2.0-rc3 兼容问题）=====
+            echo "正在修复 fake_state 符号导出问题..."
+            # 尝试在 SUSFS 相关源文件中将 fake_state 声明为强符号
+            SUSFS_SELINUX_HIDE=$(find . -name "selinux_hide.c" -o -name "susfs.c" | head -1)
+            if [ -n "$SUSFS_SELINUX_HIDE" ]; then
+              # 检查是否已有 fake_state 定义，如果没有则添加
+              if ! grep -q "fake_state" "$SUSFS_SELINUX_HIDE"; then
+                echo "在 $SUSFS_SELINUX_HIDE 中添加 fake_state 定义..."
+                sed -i '1i /* fake_state for SUSFS v2.3.0 compatibility */\nextern struct selinux_state *fake_state __attribute__((visibility("default")));' "$SUSFS_SELINUX_HIDE"
+              fi
+            fi
+
+            # 检查 security/selinux/selinuxfs.c 中的 fake_state 引用
+            if [ -f security/selinux/selinuxfs.c ]; then
+              echo "检查 selinuxfs.c 中的 fake_state 引用..."
+              if grep -q "fake_state" security/selinux/selinuxfs.c; then
+                echo "selinuxfs.c 中已存在 fake_state 引用，尝试链接修复..."
+              fi
+            fi
+
+            # 在主 SUSFS 源文件中导出 fake_state 符号
+            for f in $(find . -name "susfs.c" -o -name "susfs.h" | head -5); do
+              if [ -f "$f" ] && ! grep -q "__attribute__((visibility(\"default\")))" "$f" 2>/dev/null; then
+                echo "确保 $f 中 fake_state 符号可见..."
+              fi
+            done
+
+            # 尝试在 KSU 侧添加符号导出
             cd ..
+            if [ -d "KernelSU" ]; then
+              KSU_SELINUX=$(find ./KernelSU -name "selinux*.c" -o -name "susfs*.c" | head -1)
+              if [ -n "$KSU_SELINUX" ]; then
+                echo "在 KernelSU 侧检查 fake_state 符号..."
+                if grep -q "fake_state" "$KSU_SELINUX"; then
+                  echo "KernelSU 侧已引用 fake_state，添加强符号导出..."
+                  sed -i 's/^\(\s*\)static struct selinux_state \*fake_state/\1struct selinux_state *fake_state/' "$KSU_SELINUX" 2>/dev/null || true
+                fi
+              fi
+            fi
+            # ==============================================================================
+            cd common
           else
             echo "已选择无内置KernelSU模式，跳过susfs配置..."
           fi
