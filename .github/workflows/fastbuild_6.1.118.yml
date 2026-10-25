@@ -555,24 +555,6 @@ jobs:
             done
           fi
            
-      - name: 临时修复：兼容新版 BakaSU 的 selinux fake_state（应急）
-        run: |
-          wget -q --tries=3 "https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/.github/scripts/hotfix_bakasu_fake_state.sh" -O /tmp/hotfix_bakasu_fake_state.sh
-          bash /tmp/hotfix_bakasu_fake_state.sh "$GITHUB_WORKSPACE/kernel_workspace"
-      - name: 集成 NoMount（v2.2.0）
-        env:
-          NOMOUNT_REF: ${{ vars.NOMOUNT_REF || 'v2.2.0' }}
-        run: |
-          echo "===== 集成 NoMount ref=$NOMOUNT_REF ====="
-          wget -q --tries=3 "https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/.github/scripts/setup_nomount.sh" -O /tmp/setup_nomount.sh
-          bash /tmp/setup_nomount.sh "$GITHUB_WORKSPACE/kernel_workspace" "$NOMOUNT_REF"
-      - name: 全量编译（临时清空 ccache）
-        if: vars.CLEAN_BUILD == 'true'
-        run: |
-          echo "CLEAN_BUILD=true，清空 ccache：$CCACHE_DIR"
-          ccache -C || true
-          ccache -z || true
-          du -sh "$CCACHE_DIR" 2>/dev/null || true
       - name: 构建内核
         run: |
           WORKDIR="$(pwd)"
