@@ -613,6 +613,13 @@ jobs:
           wget -q --tries=3 "https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/.github/scripts/hotfix_bakasu_fake_state.sh" -O /tmp/hotfix_bakasu_fake_state.sh
           bash /tmp/hotfix_bakasu_fake_state.sh "$GITHUB_WORKSPACE/kernel_workspace"
 
+      - name: 集成 NoMount（v2.2.0）
+        env:
+          NOMOUNT_REF: ${{ vars.NOMOUNT_REF || 'v2.2.0' }}
+        run: |
+          echo "===== 集成 NoMount ref=$NOMOUNT_REF ====="
+          wget -q --tries=3 "https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/.github/scripts/setup_nomount.sh" -O /tmp/setup_nomount.sh
+          bash /tmp/setup_nomount.sh "$GITHUB_WORKSPACE/kernel_workspace" "$NOMOUNT_REF"
       - name: 构建内核
         run: |
           WORKDIR="$(pwd)"
