@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 清理脚本：撤销 hotfix_bakasu_fake_state.sh 对内核源码的临时修改
+# 清理脚本：撤销 hotfix_bakasu_fake_state.sh 对 BakaSU / 内核源码的临时修改
 #
 # 只做两件事：
-#   1. 用 *.hotfix-bak 备份恢复 security/selinux/hooks.c 与 selinuxfs.c
+#   1. 把 KernelSU/kernel/feature/selinux_hide.c 从 .hotfix-bak 还原
+#      （兼容旧版脚本：如果存在 security/selinux/hooks.c、selinuxfs.c 的
+#        .hotfix-bak，也一并还原）
 #   2. 删除对应的 *.hotfix-bak 备份文件
 #
 # 明确不会：
@@ -36,12 +38,17 @@ else
   log "未找到内核源码（$KERNEL_ROOT[/common]/security/selinux），跳过。"
   exit 0
 fi
+KERNEL_ROOT="$(cd "$COMMON/.." && pwd)"
 
-HOOKS="$COMMON/security/selinux/hooks.c"
-SELINUXFS="$COMMON/security/selinux/selinuxfs.c"
+FILES=(
+  "$COMMON/security/selinux/hooks.c"
+  "$COMMON/security/selinux/selinuxfs.c"
+  "$KERNEL_ROOT/KernelSU/kernel/feature/selinux_hide.c"
+  "$KERNEL_ROOT/KernelSU-Next/kernel/feature/selinux_hide.c"
+)
+
 RESTORED=0
-
-for f in "$HOOKS" "$SELINUXFS"; do
+for f in "${FILES[@]}"; do
   if [[ -f "$f.hotfix-bak" ]]; then
     if [[ "${HOTFIX_DRY_RUN:-0}" == "1" ]]; then
       log "dry-run：将恢复 $f（来自 $f.hotfix-bak）"

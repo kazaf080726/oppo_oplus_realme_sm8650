@@ -1,44 +1,38 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 临时应急修复：兼容新版 BakaSU 的 selinux fake_state
+# 临时应急修复：为 BakaSU 补回 SELinux hide 所需的 fake_state
 #
-# 现象：
-#   vmlinux 链接阶段报
-#       ld.lld: error: undefined symbol: fake_state
-#       >>> referenced by selinuxfs.c:726 (../security/selinux/selinuxfs.c:726)
-#       >>>               security/selinux/selinuxfs.o:(sel_write_context)
-#   随后 pahole / .btf.vmlinux.bin.o 连锁报错（“Invalid argument”“unknown file type”）。
+# 现象（第一次修复后）：
+#   内核能编译、能刷入，但 SELinux hide 功能完全失效。
 #
 # 原因：
-#   susfs4oki 的 6.1 内核补丁 50_add_susfs_in_gki-android14-6.1.patch 在
-#   security/selinux/hooks.c、security/selinux/selinuxfs.c 中加入
+#   susfs4oki 的 6.1 补丁（50_add_susfs_in_gki-android14-6.1.patch）在
+#   security/selinux/hooks.c、selinuxfs.c 里使用
 #       extern struct selinux_state fake_state;
-#   并把 app(uid >= 10000) 写 selinux 上下文时的校验切到 &fake_state。
-#   该符号原本由 BakaSU 的 kernel/feature/selinux_hide.c 提供。
-#   BakaSU 提交 fa12ffde（v4.2.0-rc3，2026-10-11，cherry-pick tiann/KernelSU #3877）
-#   重构 selinux_hide 后删除了 fake_state（fake_status 等仍然保留），
-#   而 50 号补丁没有同步更新，于是链接时找不到符号。
+#   来做 app（uid>=10000）的上下文校验/伪装。
+#   BakaSU 在 fa12ffde（v4.2.0-rc3）重构 selinux_hide 时删除了 fake_state；
+#   而在 susfs 模式下（KSU_COMPAT_HAS_SUSFS_FEATURE_SELINUX_HIDE）BakaSU 会
+#   跳过自己的 selinuxfs 钩子，把 SELinux hide 完全交给 susfs 内核补丁。
+#   于是补丁成为唯一实现，fake_state 缺失 = SELinux hide 整体失效。
 #
-#   工作流只在 ksu_type == ksu（原版 KernelSU）时才应用
-#   kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch；
-#   bakasu / sukisu（都指向 BakaSU）不会应用，因此缺少 fake_state 的定义。
+#   之前的应急方案把 &fake_state 换成真实 state，虽然能链接，但等于把
+#   SUSFS 的隐藏路径改回“真实策略校验”，所以功能失效。本脚本废弃该方案。
 #
-# 本脚本做什么：
-#   只在内核源码【打完 50 号补丁之后】做幂等的兼容处理，且只在
-#   BakaSU 确实没有定义 fake_state 时才动手：
-#     hooks.c      &fake_state  ->  &selinux_state   （上游原本就是 &selinux_state）
-#     selinuxfs.c  &fake_state  ->  state            （函数内 struct selinux_state *state = fsi->state）
-#   并删除已经无用的 extern 声明。
+# 正确做法（与 WildKernels / cctv18 10_enable 的设计一致）：
+#   1. 在 BakaSU 的 kernel/feature/selinux_hide.c 中补一个全局
+#        struct selinux_state fake_state;
+#   2. 在 ksu_selinux_hide_enable() 里、备份策略检查通过后，用
+#        fake_state.initialized = true;
+#        fake_state.policy = backup_sepolicy;
+#      初始化它（6.1 属于 5.10+ / <6.6 分支）。
+#   3. 内核里的 &fake_state 引用保持原样，由 BakaSU 提供真实符号。
 #
-#   新版 BakaSU 的 selinux_hide 已经用 backup_policydb/backup_sidtab + fops 包装
-#   自行接管 app 的上下文写入（my_write_context），补丁里这条 fake_state 分支
-#   在 uid>=10000 时不会真正被走到；退回到真实 selinux_state 与上游行为一致，
-#   不影响 SUSFS 的其余功能（sus_path / sus_mount / open_redirect / status 等）。
+#   这样 susfs 内核补丁的 sel_write_context / sel_write_access /
+#   selinux_setprocattr 重新走“备份策略”校验，SELinux hide 恢复。
 #
-# 本脚本不修改：
-#   - 原始工作流（只由工作流新增的一步调用本脚本）
-#   - local/ 下的原始构建脚本
-#   - susfs4oki / BakaSU / 任何补丁文件
+# 本脚本只修改 runner 里的 BakaSU 克隆，不修改：
+#   - 仓库里的原始工作流 / 原始构建脚本 / 补丁
+#   - 内核源码里的 &fake_state 引用
 #
 # 用法：
 #   bash .github/scripts/hotfix_bakasu_fake_state.sh [kernel_workspace 或 common 目录]
@@ -85,71 +79,122 @@ if [[ "$TOTAL" -eq 0 ]]; then
   exit 0
 fi
 
-# 若 KernelSU 侧仍然定义 fake_state（旧版 BakaSU，或已应用 10_enable_susfs_for_ksu.patch），
-# 保持补丁原始逻辑，不做任何修改。
-KSU_DEF=""
-for d in "$KERNEL_ROOT/KernelSU" "$KERNEL_ROOT/KernelSU-Next"; do
-  [[ -d "$d" ]] || continue
-  if grep -rqsE --include='*.c' --include='*.h' \
-      '^[[:space:]]*(__maybe_static[[:space:]]+)?struct[[:space:]]+selinux_state[[:space:]]+fake_state[[:space:]]*;' \
-      "$d"; then
-    KSU_DEF="$d"
+log "内核源码：$COMMON"
+log "susfs 补丁引用 fake_state：hooks.c=$HOOKS_N 处，selinuxfs.c=$FS_N 处。"
+log "开始为 KernelSU/BakaSU 补回全局 fake_state 并从 backup_sepolicy 初始化 ..."
+
+if [[ "${HOTFIX_DRY_RUN:-0}" == "1" ]]; then
+  log "dry-run：只检查，不修改。"
+  exit 0
+fi
+
+PYTHON_BIN=""
+for c in python3 python; do
+  if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys' >/dev/null 2>&1; then
+    PYTHON_BIN="$c"
+    break
+  fi
+done
+if [[ -z "$PYTHON_BIN" ]]; then
+  log "错误：找不到 python3/python，无法安全地打补丁。"
+  exit 1
+fi
+
+PATCHED_FILE=""
+for KSU_DIR in "$KERNEL_ROOT/KernelSU" "$KERNEL_ROOT/KernelSU-Next"; do
+  HIDE="$KSU_DIR/kernel/feature/selinux_hide.c"
+  [[ -f "$HIDE" ]] || continue
+
+  if grep -q 'struct selinux_state fake_state;' "$HIDE"; then
+    log "已存在 fake_state 定义：$HIDE"
+    PATCHED_FILE="$HIDE"
+    break
+  fi
+
+  if ! grep -q 'static DEFINE_MUTEX(selinux_hide_mutex);' "$HIDE" || \
+     ! grep -q 'no backup sidtab available' "$HIDE"; then
+    log "跳过（锚点不匹配）：$HIDE"
+    continue
+  fi
+
+  log "正在补 fake_state：$HIDE"
+  if [[ ! -f "$HIDE.hotfix-bak" ]]; then
+    cp -p "$HIDE" "$HIDE.hotfix-bak"
+    log "已备份：$HIDE.hotfix-bak"
+  fi
+  "$PYTHON_BIN" - "$HIDE" <<'PY'
+import sys
+
+path = sys.argv[1]
+with open(path, encoding='utf-8') as fh:
+    src = fh.read()
+
+if 'struct selinux_state fake_state;' in src:
+    print('already-patched')
+    sys.exit(0)
+
+anchor1 = 'static DEFINE_MUTEX(selinux_hide_mutex);\n'
+if src.count(anchor1) != 1:
+    print('anchor1-not-unique', file=sys.stderr)
+    sys.exit(2)
+src = src.replace(anchor1, anchor1 + 'struct selinux_state fake_state;\n', 1)
+
+tail = '''    if (!backup_sidtab) {
+        pr_err("no backup sidtab available, please save feature and reboot to retry!\\n");
+        return -EAGAIN;
+    }
+#endif
+'''
+if src.count(tail) != 1:
+    print('anchor2-not-unique', file=sys.stderr)
+    sys.exit(3)
+
+prime = tail + '''
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) || defined(KSU_COMPAT_HAS_SELINUX_POLICY_STRUCT)
+    fake_state.initialized = true;
+    fake_state.policy = backup_sepolicy;
+    pr_info("selinux_hide: fake_state primed from backup_sepolicy\\n");
+#endif
+'''
+src = src.replace(tail, prime, 1)
+
+with open(path, 'w', encoding='utf-8', newline='') as fh:
+    fh.write(src)
+print('patched')
+PY
+
+  if grep -q 'struct selinux_state fake_state;' "$HIDE" && \
+     grep -q 'fake_state.policy = backup_sepolicy;' "$HIDE"; then
+    log "fake_state 已补齐并初始化：$HIDE"
+    PATCHED_FILE="$HIDE"
     break
   fi
 done
 
-if [[ -n "$KSU_DEF" ]]; then
-  log "KernelSU 目录仍定义 fake_state（$KSU_DEF），保留补丁原始逻辑，跳过。"
-  exit 0
-fi
-
-log "内核源码：$COMMON"
-log "检测到补丁引用 fake_state（hooks.c=$HOOKS_N 处，selinuxfs.c=$FS_N 处），但 KernelSU 未定义该符号。"
-log "新版 BakaSU 已删除 fake_state，开始还原为真实 selinux_state ..."
-
-if [[ "${HOTFIX_DRY_RUN:-0}" == "1" ]]; then
-  log "dry-run：将修改 hooks.c 的 $HOOKS_N 处、selinuxfs.c 的 $FS_N 处，并删除 extern 声明。"
-  exit 0
-fi
-
-for f in "$HOOKS" "$SELINUXFS"; do
-  if [[ ! -f "$f.hotfix-bak" ]]; then
-    cp -p "$f" "$f.hotfix-bak"
-    log "已备份：$f.hotfix-bak"
-  else
-    log "备份已存在，保留首次备份：$f.hotfix-bak"
-  fi
-done
-
-# hooks.c 里没有局部 state 变量，使用全局 selinux_state（上游同样调用）
-sed -i 's/&fake_state/\&selinux_state/g' "$HOOKS"
-# selinuxfs.c 的 sel_write_context / sel_write_access 内都有 struct selinux_state *state = fsi->state;
-sed -i 's/&fake_state/state/g' "$SELINUXFS"
-# 删除已无用的 extern 声明
-sed -i '/^[[:space:]]*extern struct selinux_state fake_state;[[:space:]]*$/d' "$HOOKS" "$SELINUXFS"
-
-if grep -q 'fake_state' "$HOOKS" "$SELINUXFS"; then
-  log "错误：仍残留 fake_state 引用，修复未完成。"
-  grep -n 'fake_state' "$HOOKS" "$SELINUXFS" || true
+if [[ -z "$PATCHED_FILE" ]]; then
+  log "错误：未能为当前 KernelSU 补上 fake_state（找不到 selinux_hide.c 或锚点不匹配）。"
+  log "为避免生成 SELinux hide 失效的内核，本次构建终止。"
   exit 1
 fi
 
-if ! grep -qE '^[[:space:]]*struct[[:space:]]+selinux_state[[:space:]]+\*state[[:space:]]*=[[:space:]]*fsi->state;' "$SELINUXFS"; then
-  log "错误：selinuxfs.c 中未找到局部 state 变量，替换结果可能不正确。"
+# 关键：内核里的 &fake_state 引用必须保持原样，由 BakaSU 提供符号
+if ! grep -q '&fake_state' "$HOOKS" || ! grep -q '&fake_state' "$SELINUXFS"; then
+  log "错误：内核 &fake_state 引用被意外修改，修复不完整。"
   exit 1
 fi
 
-log "修复完成：hooks.c $HOOKS_N 处 -> &selinux_state，selinuxfs.c $FS_N 处 -> state。"
-log "原始脚本、原始补丁均未修改。"
+log "完成：内核保持 &fake_state 引用，$PATCHED_FILE 提供并初始化 fake_state。"
+log "SELinux hide 的 susfs 路径已恢复（未改动原始脚本/补丁）。"
 
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   {
-    echo "### 临时应急修复：BakaSU fake_state 兼容"
+    echo "### 临时应急修复：恢复 BakaSU fake_state（SELinux hide）"
     echo ""
     echo "- 内核源码：\`$COMMON\`"
-    echo "- 修复前 \`&fake_state\` 引用：hooks.c = $HOOKS_N，selinuxfs.c = $FS_N"
-    echo "- 原因：BakaSU fa12ffde（v4.2.0-rc3）重构后删除了 \`fake_state\`，susfs4oki 的 6.1 补丁仍按旧版引用"
-    echo "- 处理：仅在 BakaSU 未定义该符号时，把旧调用点还原为真实的 selinux state"
-    echo "- 未修改：原始工作流步骤、local/ 构建脚本、susfs4oki / BakaSU 补丁"
+    echo "- susfs 补丁引用：hooks.c = $HOOKS_N，selinuxfs.c = $FS_N"
+    echo "- 处理：在 \`KernelSU/kernel/feature/selinux_hide.c\` 补全局 \`fake_state\`，"
+    echo "  并在 \`ksu_selinux_hide_enable()\` 中用 \`backup_sepolicy\` 初始化"
+    echo "- 内核中的 \`&fake_state\` 引用保持不变，SELinux hide 恢复走备份策略"
+    echo "- 未修改：原始工作流、local/ 脚本、susfs4oki / BakaSU 补丁"
   } >> "$GITHUB_STEP_SUMMARY"
 fi
