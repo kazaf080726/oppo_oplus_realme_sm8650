@@ -566,6 +566,13 @@ jobs:
           echo "===== 集成 NoMount ref=$NOMOUNT_REF ====="
           wget -q --tries=3 "https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/.github/scripts/setup_nomount.sh" -O /tmp/setup_nomount.sh
           bash /tmp/setup_nomount.sh "$GITHUB_WORKSPACE/kernel_workspace" "$NOMOUNT_REF"
+      - name: 全量编译（临时清空 ccache）
+        if: vars.CLEAN_BUILD == 'true'
+        run: |
+          echo "CLEAN_BUILD=true，清空 ccache：$CCACHE_DIR"
+          ccache -C || true
+          ccache -z || true
+          du -sh "$CCACHE_DIR" 2>/dev/null || true
       - name: 构建内核
         run: |
           WORKDIR="$(pwd)"
