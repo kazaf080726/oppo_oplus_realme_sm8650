@@ -1,0 +1,128 @@
+name: "[临时应急] 清理临时应急工作流"
+
+# 用途：
+#   上游（susfs4oki / BakaSU）修复 fake_state 兼容问题后，
+#   用本工作流把仓库里所有临时应急的 *_hotfix.yml 工作流逐个删除，
+#   恢复到只保留原始工作流的状态。
+#
+# 本工作流不会修改任何原始工作流/脚本/补丁，只删除“临时副本”文件。
+#
+# 用法（Actions 页面 Run workflow）：
+#   target = all                      删除全部临时副本（不含本清理器）
+#   target = all + include_self=true  删除全部临时副本，最后删除本清理器自身
+#   target = self                     只删除本清理器自身
+#   target = fastbuild_6.1.118_hotfix.yml   只删除指定副本（逐一删除）
+#   confirm = LIST（默认）            只列出当前临时副本，不删除
+#   confirm = DELETE                  真正执行删除
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: '要删除的临时工作流文件名；all=全部；self=清理器自身'
+        required: true
+        type: string
+        default: 'all'
+      confirm:
+        description: 'LIST=只列出（默认）；DELETE=执行删除'
+        required: true
+        type: choice
+        default: 'LIST'
+        options:
+          - 'LIST'
+          - 'DELETE'
+      include_self:
+        description: 'target=all 时，是否最后把本清理工作流也删除'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 列出并删除临时工作流
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET: ${{ inputs.target }}
+          CONFIRM: ${{ inputs.confirm }}
+          INCLUDE_SELF: ${{ inputs.include_self }}
+        run: |
+          set -euo pipefail
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/workflows"
+          SELF="cleanup-temp-hotfix.yml"
+          LIST_FILE=/tmp/temp_hotfix_list.txt
+
+          echo "===== 当前临时应急工作流 ====="
+          gh api "$API" --paginate --jq '.[].name' \
+            | grep -E '_hotfix\.yml$' | sort > "$LIST_FILE" || true
+          if [ -s "$LIST_FILE" ]; then
+            cat "$LIST_FILE"
+          else
+            echo "（无）"
+          fi
+
+          delete_one() {
+            local f="$1"
+            local sha
+            sha="$(gh api "$API/$f" --jq '.sha' 2>/dev/null || true)"
+            if [ -z "$sha" ]; then
+              echo "跳过（不存在）：$f"
+              return 0
+            fi
+            gh api -X DELETE "$API/$f" \
+              -f message="chore: 删除临时应急工作流 $f" \
+              -f sha="$sha" \
+              -f branch="$GITHUB_REF_NAME" >/dev/null
+            echo "已删除：$f"
+          }
+
+          if [ "$CONFIRM" != "DELETE" ]; then
+            echo ""
+            echo "当前为 LIST 模式，未删除任何文件。"
+            echo "确认要删除时，把 confirm 改为 DELETE 再运行。"
+            exit 0
+          fi
+
+          case "$TARGET" in
+            all)
+              echo ""
+              echo "===== 开始逐个删除（不含清理器自身）====="
+              while IFS= read -r f; do
+                [ -n "$f" ] || continue
+                [ "$f" = "$SELF" ] && continue
+                delete_one "$f"
+              done < "$LIST_FILE"
+              if [ "$INCLUDE_SELF" = "true" ]; then
+                echo ""
+                echo "===== 最后删除清理器自身 ====="
+                delete_one "$SELF"
+              else
+                echo ""
+                echo "保留清理器自身：$SELF（如需删除，设 target=self 或 include_self=true）"
+              fi
+              ;;
+            self)
+              echo ""
+              echo "===== 删除清理器自身 ====="
+              delete_one "$SELF"
+              ;;
+            *_hotfix.yml)
+              echo ""
+              echo "===== 删除指定文件：$TARGET ====="
+              delete_one "$TARGET"
+              ;;
+            *)
+              echo "target 非法：$TARGET"
+              echo "只能是 all、self 或 *_hotfix.yml 文件名"
+              exit 1
+              ;;
+          esac
+
+          echo ""
+          echo "===== 删除后剩余的临时工作流 ====="
+          gh api "$API" --paginate --jq '.[].name' \
+            | grep -E '_hotfix\.yml$' | sort || echo "（无）"

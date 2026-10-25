@@ -313,13 +313,6 @@ jobs:
             cd ./KernelSU
             patch -p1 -F 3 < 10_enable_susfs_for_ksu.patch || true
           fi
-
-      # ===== 临时应急步骤（新增；未改动任何既有步骤，上游修复后可整段删除）=====
-      - name: 临时修复：兼容新版 BakaSU 的 selinux fake_state（应急）
-        run: |
-          echo "===== 临时应急修复：BakaSU fake_state 兼容层 ====="
-          wget -q --tries=3 "https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/.github/scripts/hotfix_bakasu_fake_state.sh" -O /tmp/hotfix_bakasu_fake_state.sh
-          bash /tmp/hotfix_bakasu_fake_state.sh "$GITHUB_WORKSPACE/kernel_workspace"
           
       - name: 应用lz4 1.10.0 & zstd 1.5.7补丁
         if: inputs.lz4_enable
