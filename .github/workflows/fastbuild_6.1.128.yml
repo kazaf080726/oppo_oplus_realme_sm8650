@@ -553,10 +553,6 @@ jobs:
             done
           fi
            
-      - name: 临时修复：兼容新版 BakaSU 的 selinux fake_state（应急）
-        run: |
-          wget -q --tries=3 "https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/.github/scripts/hotfix_bakasu_fake_state.sh" -O /tmp/hotfix_bakasu_fake_state.sh
-          bash /tmp/hotfix_bakasu_fake_state.sh "$GITHUB_WORKSPACE/kernel_workspace"
       - name: 集成 NoMount（v2.2.0）
         env:
           NOMOUNT_REF: ${{ vars.NOMOUNT_REF || 'v2.2.0' }}
