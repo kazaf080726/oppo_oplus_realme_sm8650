@@ -7,6 +7,11 @@ name: "[临时应急] 清理临时应急工作流"
 #
 # 本工作流不会修改任何原始工作流/脚本/补丁，只删除“临时副本”文件。
 #
+# 重要：
+#   GitHub 不允许 GITHUB_TOKEN 删除 .github/workflows/ 下的文件（HTTP 403），
+#   所以删除动作使用仓库 secret CLEANUP_PAT（需要 workflow 权限）。
+#   仅 LIST 预览时不需要该 secret。
+#
 # 用法（Actions 页面 Run workflow）：
 #   target = all                      删除全部临时副本（不含本清理器）
 #   target = all + include_self=true  删除全部临时副本，最后删除本清理器自身
@@ -46,7 +51,8 @@ jobs:
     steps:
       - name: 列出并删除临时工作流
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CLEANUP_PAT || secrets.GITHUB_TOKEN }}
+          HAS_PAT: ${{ secrets.CLEANUP_PAT != '' }}
           TARGET: ${{ inputs.target }}
           CONFIRM: ${{ inputs.confirm }}
           INCLUDE_SELF: ${{ inputs.include_self }}
@@ -55,6 +61,13 @@ jobs:
           API="repos/${GITHUB_REPOSITORY}/contents/.github/workflows"
           SELF="cleanup-temp-hotfix.yml"
           LIST_FILE=/tmp/temp_hotfix_list.txt
+
+          if [ "$CONFIRM" = "DELETE" ] && [ "$HAS_PAT" != "true" ]; then
+            echo "错误：缺少仓库 secret CLEANUP_PAT。"
+            echo "GitHub 不允许 GITHUB_TOKEN 删除 .github/workflows 下的文件，"
+            echo "必须使用带 workflow 权限的 PAT（Settings → Secrets → CLEANUP_PAT）。"
+            exit 1
+          fi
 
           echo "===== 当前临时应急工作流 ====="
           gh api "$API" --paginate --jq '.[].name' \
