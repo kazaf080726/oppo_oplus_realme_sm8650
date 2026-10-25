@@ -100,7 +100,24 @@ if [[ -z "$PYTHON_BIN" ]]; then
   exit 1
 fi
 
-PATCHED_FILE=""
+# 先在整个 KSU 树里查找 fake_state 的“定义”（排除 extern 声明）
+FAKE_DEF=""
+for KSU_DIR in "$KERNEL_ROOT/KernelSU" "$KERNEL_ROOT/KernelSU-Next"; do
+  [[ -d "$KSU_DIR" ]] || continue
+  if grep -rqsE --include='*.c' --include='*.h' \
+      '^[[:space:]]*(__maybe_static[[:space:]]+)?struct[[:space:]]+selinux_state[[:space:]]+fake_state[[:space:]]*;' \
+      "$KSU_DIR"; then
+    FAKE_DEF="$KSU_DIR"
+    break
+  fi
+done
+
+PATCHED_FILE="$FAKE_DEF"
+if [[ -n "$PATCHED_FILE" ]]; then
+  log "已存在 fake_state 定义：$PATCHED_FILE（内核 &fake_state 引用保持不变）"
+fi
+
+if [[ -z "$PATCHED_FILE" ]]; then
 for KSU_DIR in "$KERNEL_ROOT/KernelSU" "$KERNEL_ROOT/KernelSU-Next"; do
   HIDE="$KSU_DIR/kernel/feature/selinux_hide.c"
   [[ -f "$HIDE" ]] || continue
@@ -170,11 +187,23 @@ PY
     break
   fi
 done
+fi
 
 if [[ -z "$PATCHED_FILE" ]]; then
-  log "错误：未能为当前 KernelSU 补上 fake_state（找不到 selinux_hide.c 或锚点不匹配）。"
-  log "为避免生成 SELinux hide 失效的内核，本次构建终止。"
-  exit 1
+  log "警告：未找到可补 fake_state 的 BakaSU 源码（当前 KSU 可能不是 BakaSU）。"
+  log "回退到真实 selinux state：构建可继续，但该 KSU 的 SUSFS SELinux hide 可能受限。"
+  for f in "$HOOKS" "$SELINUXFS"; do
+    [[ -f "$f.hotfix-bak" ]] || cp -p "$f" "$f.hotfix-bak"
+  done
+  sed -i 's/&fake_state/\&selinux_state/g' "$HOOKS"
+  sed -i 's/&fake_state/state/g' "$SELINUXFS"
+  sed -i '/^[[:space:]]*extern struct selinux_state fake_state;[[:space:]]*$/d' "$HOOKS" "$SELINUXFS"
+  if grep -q 'fake_state' "$HOOKS" "$SELINUXFS"; then
+    log "错误：回退到真实 state 后仍残留 fake_state 引用。"
+    exit 1
+  fi
+  log "回退完成：已改用真实 selinux state（仅影响该 KSU 变体）。"
+  exit 0
 fi
 
 # 关键：内核里的 &fake_state 引用必须保持原样，由 BakaSU 提供符号
