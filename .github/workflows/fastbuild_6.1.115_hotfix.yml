@@ -563,6 +563,7 @@ jobs:
 
       # ===== 临时应急步骤（本文件为临时副本，原工作流未改动；上游修复后用 cleanup-temp-hotfix.yml 删除本文件）=====
       - name: 临时修复：兼容新版 BakaSU 的 selinux fake_state（应急）
+        if: ${{ github.event.inputs.ksu_type == 'bakasu' }}
         run: |
           echo "===== 临时应急修复：BakaSU fake_state 兼容层 ====="
           wget -q --tries=3 "https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/.github/scripts/hotfix_bakasu_fake_state.sh" -O /tmp/hotfix_bakasu_fake_state.sh
