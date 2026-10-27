@@ -13,6 +13,11 @@ env:
 on:
   workflow_dispatch:
     inputs:
+      nomount_enable:
+        description: '是否内置 NoMount 内核驱动并嵌入最新 metamodule（每次构建现拉最新 Release）'
+        required: true
+        type: boolean
+        default: true
       ksu_type:
         description: 'SukiSU Ultra / KernelSU（临时修复流；默认全功能开启）'
         required: true
@@ -561,6 +566,14 @@ jobs:
             done
           fi
            
+      - name: 集成 NoMount（最新 Release）
+        if: inputs.nomount_enable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          wget -q --tries=3 "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME/.github/scripts/setup_nomount_latest.sh" -O /tmp/setup_nomount_latest.sh
+          bash /tmp/setup_nomount_latest.sh "$GITHUB_WORKSPACE/kernel_workspace"
+
       - name: 构建内核
         run: |
           WORKDIR="$(pwd)"
@@ -646,6 +659,33 @@ jobs:
           echo "编译后空间:"
           df -h
 
+      - name: 校验 NoMount 与功能配置
+        if: always()
+        env:
+          NOMOUNT_ENABLE: ${{ inputs.nomount_enable }}
+          KSU_TYPE: ${{ inputs.ksu_type }}
+          SUSFS_ENABLE: ${{ inputs.susfs_enable }}
+          KPM_ENABLE: ${{ inputs.kpm_enable }}
+          LZ4_ENABLE: ${{ inputs.lz4_enable }}
+          LZ4KD_ENABLE: ${{ inputs.lz4kd_enable }}
+          BBR_ENABLE: ${{ inputs.bbr_enable }}
+          DROIDSPACES_ENABLE: ${{ inputs.droidspaces_enable }}
+          SSG_ENABLE: ${{ inputs.ssg_enable || 'false' }}
+          ADIOS_ENABLE: ${{ inputs.adios_enable || 'false' }}
+          REKERNEL_ENABLE: ${{ inputs.rekernel_enable }}
+          BASEBAND_GUARD: ${{ inputs.baseband_guard }}
+        run: |
+          wget -q --tries=3 "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME/.github/scripts/verify_nomount_features.sh" -O /tmp/verify_nomount_features.sh
+          bash /tmp/verify_nomount_features.sh "$GITHUB_WORKSPACE/kernel_workspace" "$NOMOUNT_ENABLE" "$GITHUB_WORKSPACE/verification.txt"
+
+      - name: 上传校验报告
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: verification-${{ github.run_id }}
+          path: ${{ github.workspace }}/verification.txt
+          archive: false
+
       - name: 保存新的 ccache 缓存
         if: inputs.ccache_update || steps.ccache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
@@ -673,6 +713,9 @@ jobs:
           rm -rf ./AnyKernel3/.git
           cd AnyKernel3
           cp ../common/out/arch/arm64/boot/Image ./Image
+          if [ -f "$GITHUB_WORKSPACE/nomount-module.zip" ]; then
+            cp "$GITHUB_WORKSPACE/nomount-module.zip" "./NoMount-${NOMOUNT_TAG:-latest}.zip"
+          fi
           if [[ ! -f ./Image ]]; then
             echo "未找到内核镜像文件，构建可能出错"
             exit 1
