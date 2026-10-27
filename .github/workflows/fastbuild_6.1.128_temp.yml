@@ -831,8 +831,21 @@ jobs:
           #### ※※※刷写内核有风险，为防止出现意外导致手机变砖，在刷入内核前请务必用[KernelFlasher](https://github.com/capntrips/KernelFlasher)等软件备份boot等关键启动分区!※※※
           EOF
 
-          gh release create "${{ env.TAG_HEAD }}-${{ env.TIME }}" \
-            --repo "${{ github.repository }}" \
-            --title "${OUTPUT_NAME}" \
-            --notes-file release_notes.md \
-            release_zips/*.zip
+          TAG_NAME="${TAG_HEAD}-${TIME}"
+          ASSET=$(find release_zips -maxdepth 1 -name '*.zip' -print -quit)
+          if [ -z "$ASSET" ]; then
+            echo "未找到发布资产"
+            exit 1
+          fi
+          RELEASE_ID=$(gh api --method POST "/repos/${GITHUB_REPOSITORY}/releases" \
+            -f tag_name="$TAG_NAME" \
+            -f name="$OUTPUT_NAME" \
+            -F body=@release_notes.md \
+            --jq '.id')
+          ASSET_NAME=$(basename "$ASSET")
+          ENCODED_NAME=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$ASSET_NAME")
+          curl -sS -f -X POST \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Content-Type: application/zip" \
+            --data-binary @"$ASSET" \
+            "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${ENCODED_NAME}"

@@ -106,7 +106,7 @@ jobs:
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
             KSU_TYPENAME="KSUNext"
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
-            KSU_TYPENAME="KSU"
+            KSU_TYPENAME="KernelSU"
           else
             KSU_TYPENAME="none"
           fi
