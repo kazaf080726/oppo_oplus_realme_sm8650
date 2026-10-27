@@ -571,7 +571,8 @@ jobs:
       - name: 集成 NoMount（最新 Release）
         if: inputs.nomount_enable
         run: |
-          bash "$GITHUB_WORKSPACE/.github/scripts/setup_nomount_latest.sh" "$GITHUB_WORKSPACE/kernel_workspace"
+          wget -q --tries=3 "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME/.github/scripts/setup_nomount_latest.sh" -O /tmp/setup_nomount_latest.sh
+          bash /tmp/setup_nomount_latest.sh "$GITHUB_WORKSPACE/kernel_workspace"
 
       - name: 构建内核
         run: |
@@ -674,7 +675,8 @@ jobs:
           REKERNEL_ENABLE: ${{ inputs.rekernel_enable }}
           BASEBAND_GUARD: ${{ inputs.baseband_guard }}
         run: |
-          bash "$GITHUB_WORKSPACE/.github/scripts/verify_nomount_features.sh" "$GITHUB_WORKSPACE/kernel_workspace" "$NOMOUNT_ENABLE" "$GITHUB_WORKSPACE/verification.txt"
+          wget -q --tries=3 "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME/.github/scripts/verify_nomount_features.sh" -O /tmp/verify_nomount_features.sh
+          bash /tmp/verify_nomount_features.sh "$GITHUB_WORKSPACE/kernel_workspace" "$NOMOUNT_ENABLE" "$GITHUB_WORKSPACE/verification.txt"
 
       - name: 上传校验报告
         if: always()
