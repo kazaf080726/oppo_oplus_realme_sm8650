@@ -570,6 +570,8 @@ jobs:
            
       - name: 集成 NoMount（最新 Release）
         if: inputs.nomount_enable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           wget -q --tries=3 "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME/.github/scripts/setup_nomount_latest.sh" -O /tmp/setup_nomount_latest.sh
           bash /tmp/setup_nomount_latest.sh "$GITHUB_WORKSPACE/kernel_workspace"
