@@ -1,4 +1,4 @@
-name: '[临时修复] 6.1.118 KSU/SukiSU Ultra'
+name: '[临时修复] 6.1.118 欧加真OKI内核快速构建 KSU/SukiSU'
 
 env:
   TZ: Asia/Shanghai
@@ -254,15 +254,6 @@ jobs:
             curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/refs/heads/main/kernel/setup.sh" | bash -s main
             echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%@cctv18"' >> ./common/arch/arm64/configs/gki_defconfig
             cd ./KernelSU
-
-            # ===== 绕过 BakaSU 的 SUSFS 兼容性拦截，否则会因上游未同步而 $(error ...) 停止编译 =====
-            if [ -f kernel/tools/susfs_compat.mk ]; then
-              sed -i '/Please wait susfs update/d' kernel/tools/susfs_compat.mk || true
-              sed -i '/susfs has NOT update/d' kernel/tools/susfs_compat.mk || true
-              sed -i '/Please wait simonpunk update/d' kernel/tools/susfs_compat.mk || true
-            fi
-            # ==============================================================================
-
             # 生成自定义版本号（基于提交计数）, 失败时使用 114514
             KSU_VERSION=$(expr $(git rev-list --count main) + 30700 2>/dev/null || echo 114514)
             # 存储版本号到 GitHub 环境变量
@@ -317,13 +308,9 @@ jobs:
             patch -p1 -F 3 < 50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
             patch -p1 -N -F 3 < 69_hide_stuff.patch || true
             # 6.1 dev 补丁的 fs/namespace.c include hunk 失败，手动补回
-            if ! grep -q 'linux/susfs_def.h' fs/namespace.c; then
-              sed -i '/#include <linux\/mnt_idmapping.h>/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs_def.h>\n#endif' fs/namespace.c
-            fi
             if ! grep -q '#define CL_COPY_MNT_NS' fs/namespace.c; then
-              sed -i '/#include <linux\/susfs_def.h>/a #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n#define CL_COPY_MNT_NS (1UL << 25)\n#endif' fs/namespace.c
+              sed -i '/#include <linux\/fs_context.h>/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs_def.h>\n#endif\n#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n#define CL_COPY_MNT_NS (1UL << 25)\n#endif' fs/namespace.c
             fi
-
             cd ..
           else
             echo "已选择无内置KernelSU模式，跳过susfs配置..."
@@ -576,8 +563,6 @@ jobs:
             done
           fi
            
-
-      # ===== 临时应急步骤（本文件为临时副本，原工作流未改动；上游修复后用 cleanup-temp-hotfix.yml 删除本文件）=====
       - name: 集成 NoMount（v2.2.0）
         env:
           NOMOUNT_REF: ${{ vars.NOMOUNT_REF || 'v2.2.0' }}
@@ -585,13 +570,6 @@ jobs:
           echo "===== 集成 NoMount ref=$NOMOUNT_REF ====="
           wget -q --tries=3 "https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/.github/scripts/setup_nomount.sh" -O /tmp/setup_nomount.sh
           bash /tmp/setup_nomount.sh "$GITHUB_WORKSPACE/kernel_workspace" "$NOMOUNT_REF"
-      - name: 全量编译（临时清空 ccache）
-        if: vars.CLEAN_BUILD == 'true'
-        run: |
-          echo "CLEAN_BUILD=true，清空 ccache：$CCACHE_DIR"
-          ccache -C || true
-          ccache -z || true
-          du -sh "$CCACHE_DIR" 2>/dev/null || true
       - name: 构建内核
         run: |
           WORKDIR="$(pwd)"

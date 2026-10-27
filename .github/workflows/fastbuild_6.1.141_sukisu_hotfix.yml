@@ -311,10 +311,6 @@ jobs:
             if ! grep -q '#define CL_COPY_MNT_NS' fs/namespace.c; then
               sed -i '/#include <linux\/fs_context.h>/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs_def.h>\n#endif\n#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n#define CL_COPY_MNT_NS (1UL << 25)\n#endif' fs/namespace.c
             fi
-            # 6.1 dev 补丁的 fs/namespace.c include hunk 失败，手动补回
-            if ! grep -q 'linux/susfs_def.h' fs/namespace.c; then
-              sed -i '/#include <linux\/mnt_idmapping.h>/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs_def.h>\n#endif' fs/namespace.c
-            fi
             cd ..
           else
             echo "已选择无内置KernelSU模式，跳过susfs配置..."
