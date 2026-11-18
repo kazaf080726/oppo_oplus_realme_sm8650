@@ -583,6 +583,30 @@ jobs:
           wget -q --tries=3 "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME/.github/scripts/setup_nomount_latest.sh" -O /tmp/setup_nomount_latest.sh
           bash /tmp/setup_nomount_latest.sh "$GITHUB_WORKSPACE/kernel_workspace"
 
+      - name: 兼容旧内核 SUSFS MM helpers
+        if: inputs.susfs_enable
+        run: |
+          cd kernel_workspace/common
+          python3 - <<'PY'
+          p = 'fs/proc/task_mmu.c'
+          s = open(p).read()
+          anchor = '#include "internal.h"'
+          if anchor not in s:
+              anchor = '#include <linux/mm.h>'
+          defs = []
+          if 'VMA_PAD_START(' in s and '#define VMA_PAD_START' not in s:
+              defs.append('#ifndef VMA_PAD_START\n#define VMA_PAD_START(vma) ((vma)->vm_end)\n#endif')
+          if 'vma_pad_pages(' in s and '#define vma_pad_pages' not in s:
+              defs.append('#ifndef vma_pad_pages\n#define vma_pad_pages(vma) 0\n#endif')
+          if '__fold_filemap_fixup_entry(' in s and '#define __fold_filemap_fixup_entry' not in s:
+              defs.append('#ifndef __fold_filemap_fixup_entry\n#define __fold_filemap_fixup_entry(iter, end) do { } while (0)\n#endif')
+          if defs:
+              if anchor not in s:
+                  raise SystemExit('task_mmu include anchor not found')
+              s = s.replace(anchor, anchor + '\n' + '\n'.join(defs) + '\n', 1)
+              open(p, 'w').write(s)
+          PY
+
       - name: 构建内核
         run: |
           WORKDIR="$(pwd)"
