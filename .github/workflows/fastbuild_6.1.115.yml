@@ -1,8 +1,6 @@
 name: 6.1.115 (天玑特供)欧加真OKI内核快速构建
 
 env:
-  SOC_NAME: '天玑'
-  REGION_NAME: '欧加真'
   TZ: Asia/Shanghai
   ANDROID_VERSION: 'android14'
   KERNEL_VERSION: '6.1'
@@ -13,11 +11,6 @@ env:
 on:
   workflow_dispatch:
     inputs:
-      nomount_enable:
-        description: '是否内置 NoMount 内核驱动并嵌入最新 metamodule（每次构建现拉最新 Release）'
-        required: true
-        type: boolean
-        default: true
       ksu_type:
         description: 'KernelSU分支(BakaSU/SukiSU Ultra/KernelSU Next/KSU(原版)/无内置KSU,默认BakaSU)'
         required: true
@@ -558,20 +551,6 @@ jobs:
             done
           fi
            
-      - name: 临时修复：兼容新版 BakaSU 的 selinux fake_state（应急）
-        if: inputs.ksu_type == 'bakasu'
-        run: |
-          wget -q --tries=3 "https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/.github/scripts/hotfix_bakasu_fake_state.sh" -O /tmp/hotfix_bakasu_fake_state.sh
-          bash /tmp/hotfix_bakasu_fake_state.sh "$GITHUB_WORKSPACE/kernel_workspace"
-
-      - name: 集成 NoMount（最新 Release）
-        if: inputs.nomount_enable
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          wget -q --tries=3 "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME/.github/scripts/setup_nomount_latest.sh" -O /tmp/setup_nomount_latest.sh
-          bash /tmp/setup_nomount_latest.sh "$GITHUB_WORKSPACE/kernel_workspace"
-
       - name: 构建内核
         run: |
           WORKDIR="$(pwd)"
@@ -656,33 +635,6 @@ jobs:
           echo "编译后空间:"
           df -h
 
-      - name: 校验 NoMount 与功能配置
-        if: always()
-        env:
-          NOMOUNT_ENABLE: ${{ inputs.nomount_enable }}
-          KSU_TYPE: ${{ inputs.ksu_type }}
-          SUSFS_ENABLE: ${{ inputs.susfs_enable }}
-          KPM_ENABLE: ${{ inputs.kpm_enable }}
-          LZ4_ENABLE: ${{ inputs.lz4_enable }}
-          LZ4KD_ENABLE: ${{ inputs.lz4kd_enable }}
-          BBR_ENABLE: ${{ inputs.bbr_enable }}
-          DROIDSPACES_ENABLE: ${{ inputs.droidspaces_enable }}
-          SSG_ENABLE: ${{ inputs.ssg_enable || 'false' }}
-          ADIOS_ENABLE: ${{ inputs.adios_enable || 'false' }}
-          REKERNEL_ENABLE: ${{ inputs.rekernel_enable }}
-          BASEBAND_GUARD: ${{ inputs.baseband_guard }}
-        run: |
-          wget -q --tries=3 "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME/.github/scripts/verify_nomount_features.sh" -O /tmp/verify_nomount_features.sh
-          bash /tmp/verify_nomount_features.sh "$GITHUB_WORKSPACE/kernel_workspace" "$NOMOUNT_ENABLE" "$GITHUB_WORKSPACE/verification.txt"
-
-      - name: 上传校验报告
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: verification-${{ github.run_id }}
-          path: ${{ github.workspace }}/verification.txt
-          archive: false
-
       - name: 保存新的 ccache 缓存
         if: inputs.ccache_update || steps.ccache-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
@@ -710,23 +662,20 @@ jobs:
           rm -rf ./AnyKernel3/.git
           cd AnyKernel3
           cp ../common/out/arch/arm64/boot/Image ./Image
-          if [ -f "$GITHUB_WORKSPACE/nomount-module.zip" ]; then
-            cp "$GITHUB_WORKSPACE/nomount-module.zip" "./NoMount-${NOMOUNT_TAG:-latest}.zip"
-          fi
           if [[ ! -f ./Image ]]; then
             echo "未找到内核镜像文件，构建可能出错"
             exit 1
           fi
           if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
-            KSU_TYPENAME="SukiSU Ultra"
+            KSU_TYPENAME="SukiSU"
           elif [[ ${{ github.event.inputs.ksu_type }} == "bakasu" ]]; then
             KSU_TYPENAME="BakaSU"
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
-            KSU_TYPENAME="KernelSU Next"
+            KSU_TYPENAME="KSUNext"
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
-            KSU_TYPENAME="KernelSU"
+            KSU_TYPENAME="KSU"
           else
-            KSU_TYPENAME="无内置KSU"
+            KSU_TYPENAME="none"
           fi
           if [[ ${{ github.event.inputs.lz4kd_enable }} == 'true' ]]; then
             wget https://raw.githubusercontent.com/$GITHUB_REPOSITORY/refs/heads/$GITHUB_REF_NAME/zram.zip
@@ -734,9 +683,12 @@ jobs:
           if [[ ${{ github.event.inputs.kpm_enable }} == 'true' ]]; then
             wget https://github.com/cctv18/KPatch-Next/releases/latest/download/kpn.zip
           fi
-          KSU_VER="${KSUVER:-0}"
-          AK3_NAME="[${KSU_TYPENAME}](${KSU_VER})[${SOC_NAME}](${REGION_NAME}).zip"
-          zip -r "../$AK3_NAME" ./*
+          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
+            AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ github.event.inputs.kernel_suffix }}.zip
+          else
+            AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ env.KERNEL_NAME }}.zip
+          fi
+          zip -r ../$AK3_NAME ./*
           echo "ak3name=$AK3_NAME" >> $GITHUB_OUTPUT
           
           #为AK3添加注释（调试信息）
@@ -765,7 +717,7 @@ jobs:
           echo "SSG: ${{ github.event.inputs.ssg_enable }}" >> ./ak3.log
           echo "Re-Kernel: ${{ github.event.inputs.rekernel_enable }}" >> ./ak3.log
           echo "BBG: ${{ github.event.inputs.baseband_guard }}" >> ./ak3.log
-          zip -z "../$AK3_NAME" < ./ak3.log
+          zip -z ../$AK3_NAME < ./ak3.log
 
       - name: 上传 Ccache 调试日志
         if: always() && inputs.ccache_debug
@@ -778,7 +730,7 @@ jobs:
       - name: 上传 ZIP 工件
         uses: actions/upload-artifact@v7
         with:
-          path: ${{ github.workspace }}/kernel_workspace/*.zip
+          path: ${{ github.workspace }}/kernel_workspace/AnyKernel*.zip
           archive: false
 
   release:
@@ -821,14 +773,11 @@ jobs:
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksunext" ]]; then
             KSU_TYPENAME="KernelSU Next"
           elif [[ ${{ github.event.inputs.ksu_type }} == "ksu" ]]; then
-            KSU_TYPENAME="KernelSU"
+            KSU_TYPENAME="KernelSU (Official)"
           else
             KSU_TYPENAME="无内置KSU"
           fi
           echo "KSU_TYPENAME=$KSU_TYPENAME" >> $GITHUB_ENV
-          KSU_VER="${{ needs.build.outputs.ksuver }}"
-          OUTPUT_NAME="[${KSU_TYPENAME}](${KSU_VER})[${SOC_NAME}](${REGION_NAME})"
-          echo "OUTPUT_NAME=$OUTPUT_NAME" >> $GITHUB_ENV
          
       - name: 创建发布
         id: create_release
@@ -871,21 +820,8 @@ jobs:
           #### ※※※刷写内核有风险，为防止出现意外导致手机变砖，在刷入内核前请务必用[KernelFlasher](https://github.com/capntrips/KernelFlasher)等软件备份boot等关键启动分区!※※※
           EOF
 
-          TAG_NAME="${TAG_HEAD}-${TIME}"
-          ASSET=$(find release_zips -maxdepth 1 -name '*.zip' -print -quit)
-          if [ -z "$ASSET" ]; then
-            echo "未找到发布资产"
-            exit 1
-          fi
-          RELEASE_ID=$(gh api --method POST "/repos/${GITHUB_REPOSITORY}/releases" \
-            -f tag_name="$TAG_NAME" \
-            -f name="$OUTPUT_NAME" \
-            -F body=@release_notes.md \
-            --jq '.id')
-          ASSET_NAME=$(basename "$ASSET")
-          ENCODED_NAME=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$ASSET_NAME")
-          curl -sS -f -X POST \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Content-Type: application/zip" \
-            --data-binary @"$ASSET" \
-            "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${ENCODED_NAME}"
+          gh release create "${{ env.TAG_HEAD }}-${{ env.TIME }}" \
+            --repo "${{ github.repository }}" \
+            --title "${{ env.TAG_HEAD }}-${{ env.FULL_VERSION }}" \
+            --notes-file release_notes.md \
+            release_zips/AnyKernel3_*.zip
