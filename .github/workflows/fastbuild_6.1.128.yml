@@ -605,6 +605,25 @@ jobs:
               open(p, 'w').write(s)
           PY
 
+      - name: 强制旧内核 MM helper 兼容宏
+        if: inputs.susfs_enable
+        run: |
+          cd kernel_workspace/common
+          python3 - <<'PY'
+          p = 'fs/proc/task_mmu.c'
+          s = open(p).read()
+          header = ''
+          if 'VMA_PAD_START(' in s and '#define VMA_PAD_START' not in s:
+              header += '#ifndef VMA_PAD_START\n#define VMA_PAD_START(vma) ((vma)->vm_end)\n#endif\n'
+          if 'vma_pad_pages(' in s and '#define vma_pad_pages' not in s:
+              header += '#ifndef vma_pad_pages\n#define vma_pad_pages(vma) 0\n#endif\n'
+          if '__fold_filemap_fixup_entry(' in s and '#define __fold_filemap_fixup_entry' not in s:
+              header += '#ifndef __fold_filemap_fixup_entry\n#define __fold_filemap_fixup_entry(iter, end) do { } while (0)\n#endif\n'
+          if header:
+              s = header + s
+              open(p, 'w').write(s)
+          PY
+
       - name: 构建内核
         run: |
           WORKDIR="$(pwd)"
