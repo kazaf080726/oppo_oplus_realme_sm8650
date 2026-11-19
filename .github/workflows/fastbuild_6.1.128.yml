@@ -709,7 +709,7 @@ jobs:
           bash /tmp/setup_nomount_latest.sh "$GITHUB_WORKSPACE/kernel_workspace"
 
       - name: 兼容旧内核 SUSFS MM helpers
-        if: inputs.susfs_enable
+        if: inputs.susfs_enable && inputs.ksu_type == 'sukisu'
         run: |
           cd kernel_workspace/common
           python3 - <<'PY'
