@@ -326,6 +326,31 @@ jobs:
           PY
           grep -n 'auto-enable' common/drivers/kernelsu/feature/selinux_hide.c
 
+      - name: 对齐 SELinux access/status seqno
+        run: |
+          cd kernel_workspace
+          python3 - <<'PY'
+          import os
+
+          hide = 'common/drivers/kernelsu/feature/selinux_hide.c'
+          s = open(hide).read()
+          old = 'memcpy(new_status, status, sizeof(*status));'
+          if old in s and 'new_status->policyload = 1;' not in s:
+              s = s.replace(old, old + '\n    new_status->policyload = 1;', 1)
+              open(hide, 'w').write(s)
+
+          fs = 'common/security/selinux/selinuxfs.c'
+          s = open(fs).read()
+          old = 'susfs_security_compute_av_user(ssid, tsid, tclass, &avd);'
+          if old in s and 'avd.seqno = 1;' not in s:
+              s = s.replace(old, old + '\n\tavd.seqno = 1;', 1)
+              open(fs, 'w').write(s)
+
+          print('seqno aligned')
+          PY
+          grep -n 'new_status->policyload = 1' common/drivers/kernelsu/feature/selinux_hide.c
+          grep -n 'avd.seqno = 1' common/security/selinux/selinuxfs.c || true
+
       - name: 固定 SukiSU CI 版本号
         if: inputs.ksu_type == 'sukisu'
         run: |
