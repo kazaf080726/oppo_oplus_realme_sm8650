@@ -957,8 +957,8 @@ jobs:
         run: |
           echo "正在应用KP-N并修补内核..."
           cd kernel_workspace/common/out/arch/arm64/boot
-          wget https://github.com/KernelSU-Next/KPatch-Next/releases/latest/download/kptools-linux
-          wget https://github.com/KernelSU-Next/KPatch-Next/releases/latest/download/kpimg-linux
+          wget https://github.com/KernelSU-Next/KPatch-Next/releases/download/0.13.5-2/kptools-linux
+          wget https://github.com/KernelSU-Next/KPatch-Next/releases/download/0.13.5-2/kpimg-linux
           chmod +x ./kptools-linux
           ./kptools-linux -p -i ./Image -k ./kpimg-linux -o ./oImage
           rm -f Image
