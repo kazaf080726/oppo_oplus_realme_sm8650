@@ -6,7 +6,7 @@ env:
   KERNEL_VERSION: '6.1'
   SUB_VERSION: '128'
   KERNEL_NAME: 'android14-11-o-gca13bffobf09'
-  SUKISU_CI_VERSION: '35070'
+  SUKISU_CI_VERSION: '35082'
   SUKISU_CI_UAPI: '6'
   CCACHE_KEY: ccache-ecsv4-6.1.128
 
@@ -360,10 +360,17 @@ jobs:
           for p in ('common/drivers/kernelsu/Kbuild', 'common/drivers/kernelsu/Makefile'):
               if os.path.exists(p):
                   s = open(p).read()
-                  s = re.sub(r'^KSU_VERSION\s*:=.*$', 'KSU_VERSION := 35070', s, flags=re.M)
+                  s = re.sub(r'^KSU_VERSION\s*:=.*$', 'KSU_VERSION := 35082', s, flags=re.M)
                   open(p, 'w').write(s)
           PY
           grep -R '^KSU_VERSION' common/drivers/kernelsu/Kbuild common/drivers/kernelsu/Makefile 2>/dev/null | head
+
+      - name: 启用 Seccomp 过滤
+        run: |
+          cd kernel_workspace
+          echo "CONFIG_SECCOMP=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_SECCOMP_FILTER=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_HAVE_ARCH_SECCOMP_FILTER=y" >> ./common/arch/arm64/configs/gki_defconfig
 
       - name: 应用 KernelSU & SUSFS 补丁
         if: inputs.susfs_enable
@@ -485,6 +492,47 @@ jobs:
           PY
           grep -n 'security_read_policy_from' common/security/selinux/ss/services.c common/security/selinux/selinuxfs.c
           grep -n 'ksu_selinux_hide_is_running' common/drivers/kernelsu/feature/selinux_hide.c
+
+      - name: 强制启用 SELinux hide 并保留 backup
+        run: |
+          cd kernel_workspace
+          python3 - <<'PY'
+          # 1) force_feature=selinux_hide:1 等价：boot 各阶段自动重试
+          p = 'common/drivers/kernelsu/policy/feature.c'
+          s = open(p).read()
+          marker = 'void __init ksu_feature_init(void)\n{\n'
+          if marker not in s:
+              raise SystemExit('ksu_feature_init marker missing')
+          if 'KSU_FEATURE_SELINUX_HIDE, forced_pending' not in s:
+              inject = (
+                  '\tforced_values[KSU_FEATURE_SELINUX_HIDE] = 1;\n'
+                  '\tset_bit(KSU_FEATURE_SELINUX_HIDE, forced_mask);\n'
+                  '\tset_bit(KSU_FEATURE_SELINUX_HIDE, forced_pending);\n'
+              )
+              s = s.replace(marker, marker + inject, 1)
+              open(p, 'w').write(s)
+
+          # 2) 保留 backup_sepolicy，避免 boot_completed 提前释放
+          p = 'common/drivers/kernelsu/feature/selinux_hide.c'
+          s = open(p).read()
+          marker = 'void ksu_selinux_hide_drop_backup_if_unused()\n{\n'
+          if marker not in s:
+              raise SystemExit('drop_backup marker missing')
+          if 'return;' not in s[s.find(marker):s.find(marker) + 200]:
+              s = s.replace(marker, marker + '\treturn;\n', 1)
+          open(p, 'w').write(s)
+
+          # 3) policy dump 过滤不再依赖 running，只要 backup 存在就返回 backup
+          p = 'common/security/selinux/selinuxfs.c'
+          s = open(p).read()
+          s = s.replace(
+              'if (current_uid().val >= 10000 && ksu_selinux_hide_is_running() && backup_sepolicy)',
+              'if (current_uid().val >= 10000 && backup_sepolicy)'
+          )
+          open(p, 'w').write(s)
+          PY
+          grep -n 'KSU_FEATURE_SELINUX_HIDE' common/drivers/kernelsu/policy/feature.c | head
+          grep -n 'return;' common/drivers/kernelsu/feature/selinux_hide.c | head
 
       - name: 应用lz4 1.10.0 & zstd 1.5.7补丁
         if: inputs.lz4_enable
@@ -862,6 +910,13 @@ jobs:
           ccache -s
           echo "编译后空间:"
           df -h
+
+      - name: 校验 Seccomp 配置
+        run: |
+          cd kernel_workspace
+          grep -q '^CONFIG_SECCOMP=y' ./common/out/.config
+          grep -q '^CONFIG_SECCOMP_FILTER=y' ./common/out/.config
+          echo "Seccomp config OK"
 
       - name: 校验 NoMount 与功能配置
         if: always()
